@@ -81,30 +81,96 @@ class FaceEnhancement(object):
         
 
 if __name__=='__main__':
+    from face_enhancement import FaceEnhancement
+    from tqdm import tqdm
+    import os, os.path as osp
+    import zipfile
+    import glob
+    import cv2
+    import shutil
+
+    from DFLIMG.DFLPNG import DFLPNG
+    from DFLIMG.DFLJPG import DFLJPG
+
     model = {'name':'GPEN-BFR-512', 'size':512}
-    
-    indir = 'examples/imgs'
-    outdir = 'examples/outs-BFR'
-    os.makedirs(outdir, exist_ok=True)
+
+    faceset_dir = "/content/drive/MyDrive/faceset"
+    indir = "temp_input"
+    os.makedirs(indir, exist_ok=True)
+
+    src_names = [osp.splitext(d)[0] for d in os.listdir(faceset_dir)
+                    if osp.splitext(d)[1] == ".zip" and "superres" not in d]
 
     faceenhancer = FaceEnhancement(size=model['size'], model=model['name'], channel_multiplier=2)
 
-    files = sorted(glob.glob(os.path.join(indir, '*.*g')))
-    for n, file in enumerate(files[:]):
-        filename = os.path.basename(file)
-        
-        im = cv2.imread(file, cv2.IMREAD_COLOR) # BGR
-        if not isinstance(im, np.ndarray): print(filename, 'error'); continue
-        im = cv2.resize(im, (0,0), fx=2, fy=2)
+    for id, src in enumarate(src_names):
+        print("{} / {} [{}]".format(id+1, len(src_names), src))
+        zip_path = osp.join(faceset_dir, src+".zip")
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(indir)
 
-        img, orig_faces, enhanced_faces = faceenhancer.process(im)
-        
-        cv2.imwrite(os.path.join(outdir, '.'.join(filename.split('.')[:-1])+'_COMP.jpg'), np.hstack((im, img)))
-        cv2.imwrite(os.path.join(outdir, '.'.join(filename.split('.')[:-1])+'_GPEN.jpg'), img)
-        
-        for m, (ef, of) in enumerate(zip(enhanced_faces, orig_faces)):
-            of = cv2.resize(of, ef.shape[:2])
-            cv2.imwrite(os.path.join(outdir, '.'.join(filename.split('.')[:-1])+'_face%02d'%m+'.jpg'), np.hstack((of, ef)))
-        
-        if n%10==0: print(n, filename)
+        files = sorted(glob.glob(osp.join(indir, src, '*.*g')))
+
+        outdir = src+"_superres"
+        os.makedirs(outdir, exist_ok=True)
+
+        for n, file in enumerate(tqdm(files[:], total=len(files))):
+            filename = osp.basename(file)
+            ext = osp.splitext(file)[1]
+            if ext == ".jpg":
+                dflimg = DFLJPG.load(osp.join(input_dir, filename))
+            elif ext == ".png":
+                dflimg = DFLPNG.load(osp.join(input_dir, filename))
+            else:
+                continue
+
+            if not dflimg:
+                continue
+
+            im = cv2.imread(file, cv2.IMREAD_COLOR) # BGR
+            input_x, input_y = im.shape[:2]
+            if not isinstance(im, np.ndarray): print(filename, 'error'); continue
+            im = cv2.resize(im, (0,0), fx=2, fy=2)
+
+            img, orig_faces, enhanced_faces = faceenhancer.process(im)
+            img = cv2.resize(img, (input_x, input_y))
+            cv2.imwrite(osp.join(outdir, filename), img)
+
+            if ext == ".jpg":
+                DFLJPG.embed_dfldict (osp.join(outdir, filename), 
+                                        {'face_type': dflimg.get_face_type(),
+                                            'landmarks': dflimg.get_landmarks(),
+                                            'ie_polys' : dflimg.get_ie_polys(),
+                                            'source_filename': dflimg.get_source_filename(),
+                                            'source_rect': dflimg.get_source_rect(),
+                                            'source_landmarks': dflimg.get_source_landmarks(),
+                                            'image_to_face_mat': dflimg.get_image_to_face_mat(),
+                                            'fanseg_mask' : dflimg.dfl_dict.get ('fanseg_mask', None),
+                                            'xseg_mask' : dflimg.dfl_dict.get('xseg_mask', None),
+                                            'eyebrows_expand_mod' : None,
+                                            'relighted' : None,
+                                            "histgram" : None,
+                                            "recognition" : dflimg.get_recognition(),
+                                        })
+            elif ext == ".png":
+                dflimg = DFLPNG.embed_dfldict (osp.join(outdir, filename), 
+                                        {'face_type': dflimg.get_face_type(),
+                                            'landmarks': dflimg.get_landmarks(),
+                                            'ie_polys' : dflimg.get_ie_polys(),
+                                            'source_filename': dflimg.get_source_filename(),
+                                            'source_rect': dflimg.get_source_rect(),
+                                            'source_landmarks': dflimg.get_source_landmarks(),
+                                            'image_to_face_mat': dflimg.get_image_to_face_mat(),
+                                            'fanseg_mask' : dflimg.dfl_dict.get ('fanseg_mask', None),
+                                            'xseg_mask' : dflimg.dfl_dict.get('xseg_mask', None),
+                                            'eyebrows_expand_mod' : None,
+                                            'relighted' : None,
+                                            "histgram" : None,
+                                            "recognition" : dflimg.get_recognition(),
+                                        })
+
+
+        shutil.make_archive(outdir, 'zip', root_dir=outdir)
+        shutil.move(outdir+".zip", faceset_dir)
+        shutil.rmtree(outdir)
         
