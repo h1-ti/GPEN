@@ -4,7 +4,6 @@ import struct
 import cv2
 import numpy as np
 
-from facelib import FaceType
 from .dfllib import struct_unpack, FaceType
 
 
